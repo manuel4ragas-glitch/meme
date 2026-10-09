@@ -11,15 +11,23 @@ async function Health() {
   } catch {
     return <span className="flex items-center gap-2 text-xs text-red-400"><span className="h-2 w-2 rounded-full bg-red-500" />sin conexión</span>;
   }
-  const { run, riskTs } = health;
+  const { run, riskTs, dbMaxMb } = health;
   const age = minutesSince(run?.ts);
   const tone = age == null ? "bg-red-500" : age <= 3 && !run?.errors ? "bg-emerald-500" : age <= 10 ? "bg-amber-500" : "bg-red-500";
   const riskAge = minutesSince(riskTs);
+  const dbMb = run?.db_size_mb != null ? Number(run.db_size_mb) : null;
+  const dbRatio = dbMb != null && dbMaxMb ? dbMb / dbMaxMb : null;
+  const dbTone = dbRatio == null ? "text-zinc-600" : dbRatio >= 1 ? "text-red-400" : dbRatio >= 0.8 ? "text-amber-400" : "text-zinc-500";
+  const paused = Array.isArray(run?.error_detail) && run.error_detail.some((e: { source?: string }) => e.source === "db_size");
   return (
     <span className="flex items-center gap-2 text-xs text-zinc-400" title={run ? `Último run: ${run.tokens_seen} tokens, ${run.snapshots_saved} snapshots, ${run.errors} errores` : "Sin ejecuciones"}>
       <span className={`h-2 w-2 rounded-full ${tone}`} />
       <span>recolector {age == null ? "sin datos" : `hace ${age}m`}</span>
       <span className="hidden sm:inline text-zinc-600">· riesgo {riskAge == null ? "—" : `hace ${riskAge}m`}</span>
+      <span className={`hidden sm:inline ${dbTone}`} title="Tamaño de la base frente al límite que frena el descubrimiento">
+        · base {dbMb == null ? "—" : `${Math.round(dbMb)}${dbMaxMb ? `/${dbMaxMb}` : ""} MB`}
+      </span>
+      {paused && <span className="text-red-400">descubrimiento pausado</span>}
     </span>
   );
 }

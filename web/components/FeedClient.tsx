@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { buyRatio, fmtAge, fmtPct, fmtUsd } from "@/lib/format";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { fmtAge, fmtPct, fmtUsd } from "@/lib/format";
+import { PAGE_SIZE, toSearch, type FeedQuery, type Sort } from "@/lib/feedQuery";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
-import { useSessionEmail } from "@/lib/useSession";
+import { useIsAdmin, useSessionEmail } from "@/lib/useSession";
 import { verdictOf } from "@/lib/verdict";
 import type { FeedRow, Rules, Status } from "@/lib/types";
 import Badge from "./Badge";
@@ -16,7 +17,6 @@ const STATUSES: { key: Status; label: string }[] = [
   { key: "discarded", label: "Descartado" },
   { key: "tracking", label: "Siguiendo" },
 ];
-const ORDER: Record<string, number> = { alert: 0, candidate: 1, discarded: 2, tracking: 3 };
 const GRID = "md:grid md:grid-cols-[1.3fr_.5fr_.8fr_.8fr_.6fr_1.5fr_.6fr_.8fr_1fr] md:items-center md:gap-2";
 
 const num = (s: string): number | null => {
@@ -24,51 +24,47 @@ const num = (s: string): number | null => {
   const n = Number(s);
   return Number.isNaN(n) ? null : n;
 };
+const str = (n: number | null) => (n == null ? "" : String(n));
 
-type Sort = "status" | "age" | "mcap" | "momentum";
-
-function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
       {label}
       <input
-        inputMode="decimal" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
+        inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)}
         className="w-24 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-sm normal-case text-zinc-100 outline-none focus:border-emerald-500"
       />
     </label>
   );
 }
 
-export default function FeedClient({ rows, rules }: { rows: FeedRow[]; rules: Rules }) {
+// Los filtros viven en la URL y los aplica el servidor en la consulta; aquí solo se editan y se envían (con retardo).
+export default function FeedClient({ rows, total, query, rules }: { rows: FeedRow[]; total: number; query: FeedQuery; rules: Rules }) {
   const router = useRouter();
   const email = useSessionEmail();
-  const [mcapMin, setMcapMin] = useState(String(rules.mcap_min));
-  const [mcapMax, setMcapMax] = useState(String(rules.mcap_max));
-  const [liqMin, setLiqMin] = useState(String(rules.liq_min));
-  const [maxAge, setMaxAge] = useState(String(rules.max_age_min));
-  const [on, setOn] = useState<Set<Status>>(new Set(["alert", "candidate", "discarded"]));
-  const [sort, setSort] = useState<Sort>("status");
+  const isAdmin = useIsAdmin(email);
+  const [pending, startTransition] = useTransition();
+  const [mcapMin, setMcapMin] = useState(str(query.mcapMin));
+  const [mcapMax, setMcapMax] = useState(str(query.mcapMax));
+  const [liqMin, setLiqMin] = useState(str(query.liqMin));
+  const [maxAge, setMaxAge] = useState(str(query.maxAge));
+  const [on, setOn] = useState<Set<Status>>(new Set(query.statuses));
+  const [sort, setSort] = useState<Sort>(query.sort);
+  const [limit, setLimit] = useState(query.limit);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const shown = useMemo(() => {
-    const lo = num(mcapMin), hi = num(mcapMax), liq = num(liqMin), age = num(maxAge);
-    const list = rows.filter((r) => {
-      if (!on.has(r.status)) return false;
-      if (lo != null && (r.mcap == null || r.mcap < lo)) return false;
-      if (hi != null && (r.mcap == null || r.mcap > hi)) return false;
-      if (liq != null && r.liquidity_usd != null && r.liquidity_usd < liq) return false;
-      if (age != null && r.age_min != null && r.age_min > age) return false;
-      return true;
-    });
-    const mom = (r: FeedRow) => buyRatio(r.buys_m5, r.sells_m5) ?? -1;
-    list.sort((a, b) => {
-      if (sort === "age") return (a.age_min ?? 1e9) - (b.age_min ?? 1e9);
-      if (sort === "mcap") return (b.mcap ?? 0) - (a.mcap ?? 0);
-      if (sort === "momentum") return mom(b) - mom(a);
-      return (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || (a.age_min ?? 1e9) - (b.age_min ?? 1e9);
-    });
-    return list;
-  }, [rows, on, mcapMin, mcapMax, liqMin, maxAge, sort]);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const id = setTimeout(() => {
+      const next: FeedQuery = {
+        statuses: STATUSES.map((s) => s.key).filter((k) => on.has(k)),
+        mcapMin: num(mcapMin), mcapMax: num(mcapMax), liqMin: num(liqMin), maxAge: num(maxAge), sort, limit,
+      };
+      startTransition(() => router.replace(`/?${toSearch(next)}`, { scroll: false }));
+    }, 400);
+    return () => clearTimeout(id);
+  }, [mcapMin, mcapMax, liqMin, maxAge, on, sort, limit, router]);
 
   async function save() {
     const sb = getBrowserSupabase();
@@ -82,24 +78,27 @@ export default function FeedClient({ rows, rules }: { rows: FeedRow[]; rules: Ru
     if (!error) router.refresh();
   }
 
-  const toggle = (s: Status) => setOn((prev) => { const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n; });
+  const toggle = (s: Status) => { setLimit(PAGE_SIZE); setOn((prev) => { const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n; }); };
+  const canSave = isAdmin === true;
+  const saveHint = email === null ? "Inicia sesión para guardar" : isAdmin === false ? "Tu cuenta no es administradora" : "Guarda estos valores en la tabla rules";
 
   return (
     <div className="font-mono">
       <div className="flex flex-wrap items-end gap-3 border-b border-zinc-800 pb-3">
-        <Field label="MCap mín" value={mcapMin} onChange={setMcapMin} />
-        <Field label="MCap máx" value={mcapMax} onChange={setMcapMax} />
-        <Field label="Liq mín" value={liqMin} onChange={setLiqMin} />
-        <Field label="Edad máx (min)" value={maxAge} onChange={setMaxAge} />
+        <Field label="MCap mín" value={mcapMin} onChange={(v) => { setLimit(PAGE_SIZE); setMcapMin(v); }} />
+        <Field label="MCap máx" value={mcapMax} onChange={(v) => { setLimit(PAGE_SIZE); setMcapMax(v); }} />
+        <Field label="Liq mín" value={liqMin} onChange={(v) => { setLimit(PAGE_SIZE); setLiqMin(v); }} />
+        <Field label="Edad máx (min)" value={maxAge} onChange={(v) => { setLimit(PAGE_SIZE); setMaxAge(v); }} />
         <div className="flex items-center gap-2">
           <button
-            onClick={() => void save()} disabled={!email}
+            onClick={() => void save()} disabled={!canSave}
             className="rounded border border-emerald-600 px-3 py-1 text-xs text-emerald-300 enabled:hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:text-zinc-600"
-            title={email ? "Guarda estos valores en la tabla rules" : "Inicia sesión para guardar"}
+            title={saveHint}
           >
             Guardar en reglas
           </button>
           {email === null && <Link href="/login" className="text-[11px] text-zinc-500 underline">iniciar sesión</Link>}
+          {isAdmin === false && email && <span className="text-[11px] text-zinc-600">sin permiso de edición</span>}
           {msg && <span className="text-[11px] text-zinc-400">{msg}</span>}
         </div>
       </div>
@@ -114,22 +113,22 @@ export default function FeedClient({ rows, rules }: { rows: FeedRow[]; rules: Ru
           </button>
         ))}
         <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="ml-auto rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-zinc-300">
-          <option value="status">Orden: veredicto</option>
+          <option value="status">Orden: veredicto, luego más nuevos</option>
           <option value="age">Orden: más nuevo</option>
           <option value="mcap">Orden: MCap</option>
           <option value="momentum">Orden: compras 5m</option>
         </select>
-        <span className="text-zinc-500">{shown.length} / {rows.length}</span>
+        <span className="text-zinc-500">{pending ? "actualizando…" : `${rows.length} de ${total}`}</span>
       </div>
 
       <div className={`hidden border-b border-zinc-800 pb-1 text-[10px] uppercase tracking-wide text-zinc-500 ${GRID}`}>
         <span>Token</span><span>Edad</span><span>MCap</span><span>Liq</span><span>Liq/MC</span><span>Momentum</span><span>Top10</span><span>Insiders</span><span>Veredicto</span>
       </div>
 
-      {shown.length === 0 && <p className="py-8 text-center text-sm text-zinc-500">Ningún token cumple estos filtros.</p>}
+      {rows.length === 0 && <p className="py-8 text-center text-sm text-zinc-500">Ningún token cumple estos filtros.</p>}
 
-      <ul>
-        {shown.map((r) => {
+      <ul className={pending ? "opacity-60 transition-opacity" : ""}>
+        {rows.map((r) => {
           const v = verdictOf(r);
           const ins = r.insiders_pct;
           return (
@@ -162,6 +161,14 @@ export default function FeedClient({ rows, rules }: { rows: FeedRow[]; rules: Ru
           );
         })}
       </ul>
+
+      {rows.length < total && (
+        <div className="py-4 text-center">
+          <button onClick={() => setLimit((l) => l + PAGE_SIZE)} className="rounded border border-zinc-700 px-4 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">
+            Cargar {Math.min(PAGE_SIZE, total - rows.length)} más ({total - rows.length} restantes)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

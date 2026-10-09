@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import type { FeedQuery } from "./feedQuery";
 import { getSupabase } from "./supabase";
 import type { AgeCohort, FeedRow, Holder, OutcomeSummary, RiskCheck, Rules, Signal, Snapshot } from "./types";
 
@@ -19,18 +20,35 @@ export async function getRules(): Promise<Rules> {
   return ok(await sb.from("rules").select("*").eq("id", 1).single());
 }
 
-export async function getFeed(): Promise<FeedRow[]> {
+// Filtra, ordena y limita en la consulta (no en el navegador). `total` = filas que cumplen los filtros.
+export async function getFeed(q: FeedQuery): Promise<{ rows: FeedRow[]; total: number }> {
   const sb = await db();
-  return ok(await sb.from("token_feed").select("*").limit(1000));
+  if (!q.statuses.length) return { rows: [], total: 0 };
+  let query = sb.from("token_feed").select("*", { count: "exact" }).in("status", q.statuses);
+  if (q.mcapMin != null) query = query.gte("mcap", q.mcapMin);
+  if (q.mcapMax != null) query = query.lte("mcap", q.mcapMax);
+  // liquidez desconocida (pares pumpfun) no se excluye: igual que el recolector
+  if (q.liqMin != null) query = query.or(`liquidity_usd.is.null,liquidity_usd.gte.${q.liqMin}`);
+  if (q.maxAge != null) query = query.lte("age_min", q.maxAge);
+
+  if (q.sort === "mcap") query = query.order("mcap", { ascending: false, nullsFirst: false });
+  else if (q.sort === "momentum") query = query.order("buy_ratio_m5", { ascending: false, nullsFirst: false }).order("age_min", { ascending: true });
+  else if (q.sort === "age") query = query.order("age_min", { ascending: true });
+  else query = query.order("status_rank", { ascending: true }).order("age_min", { ascending: true }); // alertas y candidatos primero, luego los más nuevos
+
+  const res = await query.limit(q.limit);
+  if (res.error) throw new Error(res.error.message);
+  return { rows: (res.data ?? []) as FeedRow[], total: res.count ?? res.data?.length ?? 0 };
 }
 
 export async function getHealth() {
   const sb = await db();
-  const [run, risk] = await Promise.all([
-    sb.from("collector_runs").select("ts, tokens_seen, snapshots_saved, errors").order("ts", { ascending: false }).limit(1).maybeSingle(),
+  const [run, risk, rules] = await Promise.all([
+    sb.from("collector_runs").select("ts, tokens_seen, snapshots_saved, errors, db_size_mb, error_detail").order("ts", { ascending: false }).limit(1).maybeSingle(),
     sb.from("risk_checks").select("ts").order("ts", { ascending: false }).limit(1).maybeSingle(),
+    sb.from("rules").select("db_max_mb").eq("id", 1).maybeSingle(),
   ]);
-  return { run: run.data, riskTs: risk.data?.ts ?? null, error: run.error?.message ?? null };
+  return { run: run.data, riskTs: risk.data?.ts ?? null, dbMaxMb: rules.data?.db_max_mb ?? null, error: run.error?.message ?? null };
 }
 
 export async function getToken(mint: string) {

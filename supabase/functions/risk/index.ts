@@ -140,30 +140,21 @@ Deno.serve(async () => {
     const { data: rules, error: rulesErr } = await db.from("rules").select("*").eq("id", 1).single();
     if (rulesErr || !rules) throw new Error(`rules: ${rulesErr?.message ?? "sin fila"}`);
 
-    const { data: tokens, error: tErr } = await db.from("tokens").select("mint, status")
-      .in("status", ["candidate", "alert"]).order("first_seen_at").limit(MAX_TOKENS);
+    // Solo tokens que TOCAN chequear (sin los que ya completaron sus 4), filtrado ANTES del límite y
+    // ordenado por el que lleva más tiempo esperando (NULL = nunca chequeado, va primero).
+    const { data: due, error: tErr } = await db.from("tokens").select("mint, status, risk_first_at, risk_ok_count")
+      .in("status", ["candidate", "alert"]).lt("risk_ok_count", OFFSETS_MIN.length)
+      .or(`risk_next_at.is.null,risk_next_at.lte.${new Date().toISOString()}`)
+      .order("risk_next_at", { ascending: true, nullsFirst: true }).order("first_seen_at").limit(MAX_TOKENS);
     if (tErr) throw new Error(`tokens: ${tErr.message}`);
-    if (!tokens?.length) return Response.json({ ...log, note: "sin candidatos" });
-    const mints = tokens.map((t) => t.mint);
+    log.due = due?.length ?? 0;
+    if (!due?.length) return Response.json({ ...log, note: "nada pendiente" });
 
-    const { data: history } = await db.from("risk_checks").select("mint, ts, status").in("mint", mints).order("ts");
     const { data: snaps } = await db.from("market_snapshots").select("mint, ts, liquidity_usd")
-      .in("mint", mints).gt("ts", new Date(Date.now() - 15 * 60_000).toISOString()).order("ts", { ascending: false });
+      .in("mint", due.map((t) => t.mint)).gt("ts", new Date(Date.now() - 15 * 60_000).toISOString()).order("ts", { ascending: false });
 
     const latestLiq = new Map<string, number | null>();
     for (const s of snaps ?? []) if (!latestLiq.has(s.mint)) latestLiq.set(s.mint, s.liquidity_usd);
-
-    const now = Date.now();
-    const due = tokens.filter((t) => {
-      const rows = (history ?? []).filter((h) => h.mint === t.mint);
-      const k = rows.filter((h) => h.status === "ok").length;
-      if (k >= OFFSETS_MIN.length) return false;
-      const lastAttempt = rows.length ? new Date(rows[rows.length - 1].ts).getTime() : 0;
-      if (now - lastAttempt < RETRY_GAP_MS) return false;
-      const t0 = rows.length ? new Date(rows[0].ts).getTime() : now;
-      return now >= t0 + OFFSETS_MIN[k] * 60_000;
-    });
-    log.due = due.length;
 
     let first = true;
     for (const t of due) {
@@ -179,8 +170,12 @@ Deno.serve(async () => {
         const why = res.kind === "ok" ? "reporte sin topHolders" : res.kind === "rate_limited" ? "HTTP 429" : res.message;
         await db.from("risk_checks").insert({ mint: t.mint, ts, status: "unverified", risks: [{ name: "unverified", description: why }] });
         log.unverified++;
+        // el mismo token se reintenta en RETRY_GAP_MS; un alert pierde la aprobación mientras no se verifique
+        await db.from("tokens").update({
+          risk_first_at: t.risk_first_at ?? ts, risk_next_at: new Date(Date.now() + RETRY_GAP_MS).toISOString(),
+          ...(t.status === "alert" ? { status: "candidate" } : {}),
+        }).eq("mint", t.mint);
         if (t.status === "alert") {
-          await db.from("tokens").update({ status: "candidate" }).eq("mint", t.mint);
           await db.from("signals").insert({ mint: t.mint, ts, verdict: "candidate", reasons: [{ rule: "riesgo_sin_verificar", ok: false, value: why }], data: {} });
           log.changes.push(`${t.mint}: alert -> candidate (sin verificar)`);
         }
@@ -200,8 +195,15 @@ Deno.serve(async () => {
       const failed = a.discard.filter((c) => !c.ok);
       const blocked = a.blockers.filter((c) => !c.ok);
       const status = failed.length ? "discarded" : blocked.length ? "candidate" : "alert";
+      // avanza el calendario de chequeos: con 4 verificados deja de entrar en la cola (risk_next_at = NULL)
+      const okCount = t.risk_ok_count + 1;
+      const firstAt = t.risk_first_at ?? ts;
+      const nextAt = okCount >= OFFSETS_MIN.length ? null : new Date(new Date(firstAt).getTime() + OFFSETS_MIN[okCount] * 60_000).toISOString();
+      const { error: uErr } = await db.from("tokens").update({
+        risk_ok_count: okCount, risk_first_at: firstAt, risk_next_at: nextAt, ...(status !== t.status ? { status } : {}),
+      }).eq("mint", t.mint);
+      if (uErr) log.errors.push(`tokens: ${uErr.message}`);
       if (status !== t.status) {
-        await db.from("tokens").update({ status }).eq("mint", t.mint);
         await db.from("signals").insert({
           mint: t.mint, ts, verdict: status, reasons: [...a.discard, ...a.blockers],
           data: { insider_evidence: a.check.insider_evidence, top1_pct: a.check.top1_pct, top10_pct: a.check.top10_pct, datos_faltantes: a.missing },

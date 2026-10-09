@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
-import { useSessionEmail } from "@/lib/useSession";
+import { useIsAdmin, useSessionEmail } from "@/lib/useSession";
 import type { Rules } from "@/lib/types";
 
 const FIELDS: { key: keyof Rules; label: string; help: string }[] = [
@@ -17,11 +17,14 @@ const FIELDS: { key: keyof Rules; label: string; help: string }[] = [
   { key: "insiders_max_pct", label: "Insiders máximo (% supply)", help: "Sobre esto se descarta." },
   { key: "lp_locked_min_pct", label: "LP bloqueada mínima (%)", help: "Bajo esto se descarta (no aplica a la bonding curve de pump.fun)." },
   { key: "dead_liq_min", label: "Liquidez mínima de vida (USD)", help: "Bajo esto el token pasa a «muerto» y deja de seguirse." },
+  { key: "retention_days", label: "Retención de snapshots (días)", help: "Días que se conservan los snapshots de tokens muertos antes de borrarlos (solo si su backtesting ya cerró)." },
+  { key: "db_max_mb", label: "Límite de la base (MB)", help: "Sobre este tamaño el recolector deja de descubrir tokens nuevos. El plan gratuito de Supabase tiene 500 MB." },
 ];
 
 export default function RulesForm({ rules }: { rules: Rules }) {
   const router = useRouter();
   const email = useSessionEmail();
+  const isAdmin = useIsAdmin(email);
   const [vals, setVals] = useState<Record<string, string>>(() => Object.fromEntries(FIELDS.map((f) => [f.key, String(rules[f.key])])));
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -58,12 +61,13 @@ export default function RulesForm({ rules }: { rules: Rules }) {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => void save()} disabled={!email || saving}
+          onClick={() => void save()} disabled={isAdmin !== true || saving}
           className="rounded border border-emerald-600 px-4 py-1.5 text-sm text-emerald-300 enabled:hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:text-zinc-600"
         >
           {saving ? "Guardando…" : "Guardar reglas"}
         </button>
-        {email === null && <span className="text-xs text-zinc-500">Solo un usuario autenticado puede editar. <Link href="/login" className="underline">Iniciar sesión</Link></span>}
+        {email === null && <span className="text-xs text-zinc-500">Solo un administrador puede editar. <Link href="/login" className="underline">Iniciar sesión</Link></span>}
+        {email && isAdmin === false && <span className="text-xs text-zinc-500">Esta cuenta ({email}) no es administradora: puedes ver las reglas pero no cambiarlas.</span>}
         {msg && <span className="text-xs text-zinc-300">{msg}</span>}
       </div>
     </div>

@@ -42,6 +42,8 @@ export type Rules = {
   buy_ratio_min: number;
   dead_liq_min: number;
   lp_locked_min_pct: number;
+  retention_days: number;
+  db_max_mb: number;
 };
 
 export type Snapshot = {

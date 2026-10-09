@@ -92,7 +92,7 @@ function pickPair(pairs: Json[], mint: string): Json | null {
 
 type Rules = {
   mcap_min: number; mcap_max: number; liq_min: number; liq_mcap_ratio_min: number;
-  max_age_min: number; buy_ratio_min: number; dead_liq_min: number;
+  max_age_min: number; buy_ratio_min: number; dead_liq_min: number; db_max_mb: number;
 };
 type Check = { rule: string; ok: boolean; value: number | null; limit: number | string };
 
@@ -128,15 +128,19 @@ async function processBatch(batch: Json[], rules: Rules, tally: { saved: number 
   const now = new Date();
   const nowIso = now.toISOString();
   const snapshots: Json[] = [];
-  const tokenRows: Json[] = [];
-  const signals: Json[] = [];
+  // solo las columnas del recolector + el estado esperado y el deseado (ver memes.apply_collector_updates)
+  const updates: Json[] = [];
+  const signalByMint = new Map<string, Json>();
 
   for (const t of batch) {
     const pair = pickPair(pairs ?? [], t.mint);
     if (!pair) {
       const sinceSeen = now.getTime() - new Date(t.first_seen_at).getTime();
       const dead = sinceSeen > 24 * HOUR_MS;
-      tokenRows.push({ ...t, status: dead ? "dead" : t.status, next_snapshot_at: new Date(now.getTime() + 5 * 60_000).toISOString() });
+      updates.push({
+        mint: t.mint, next_snapshot_at: new Date(now.getTime() + 5 * 60_000).toISOString(),
+        expect_status: t.status, new_status: dead ? "dead" : null,
+      });
       continue;
     }
 
@@ -168,24 +172,25 @@ async function processBatch(batch: Json[], rules: Rules, tally: { saved: number 
     let status: string = t.status;
     if (deadReason) {
       status = "dead";
-      signals.push({ mint: t.mint, ts: nowIso, verdict: "dead", reasons: [deadReason], data: { mcap: s.mcap, liquidity_usd: s.liquidity_usd } });
+      signalByMint.set(t.mint, { mint: t.mint, ts: nowIso, verdict: "dead", reasons: [deadReason], data: { mcap: s.mcap, liquidity_usd: s.liquidity_usd } });
     } else if (t.status === "tracking" || t.status === "candidate") {
       // 'alert' y 'discarded' los decide la función de riesgo; el recolector no los degrada
       const ev = evaluate(s, ageMin, rules);
       status = ev.pass ? "candidate" : "tracking";
       if (status !== t.status) {
-        signals.push({
+        signalByMint.set(t.mint, {
           mint: t.mint, ts: nowIso, verdict: status, reasons: ev.checks,
           data: { mcap: s.mcap, liquidity_usd: s.liquidity_usd, age_min: Math.round(ageMin), datos_faltantes: ev.missing },
         });
       }
     }
 
-    tokenRows.push({
-      ...t, status,
-      symbol: pair.baseToken?.symbol ?? t.symbol, name: pair.baseToken?.name ?? t.name,
-      pair_address: pair.pairAddress, dex: pair.dexId, pair_created_at: createdAt.toISOString(),
+    updates.push({
+      mint: t.mint,
+      symbol: pair.baseToken?.symbol ?? null, name: pair.baseToken?.name ?? null,
+      pair_address: pair.pairAddress ?? null, dex: pair.dexId ?? null, pair_created_at: createdAt.toISOString(),
       next_snapshot_at: new Date(now.getTime() + (interval ?? 1440) * 60_000).toISOString(),
+      expect_status: t.status, new_status: status !== t.status ? status : null,
     });
   }
 
@@ -194,13 +199,16 @@ async function processBatch(batch: Json[], rules: Rules, tally: { saved: number 
     if (error) errors.push({ source: "insert_snapshots", message: error.message });
     else tally.saved += snapshots.length;
   }
-  if (tokenRows.length) {
-    const { error } = await db.from("tokens").upsert(tokenRows, { onConflict: "mint" });
-    if (error) errors.push({ source: "update_tokens", message: error.message });
-  }
-  if (signals.length) {
-    const { error } = await db.from("signals").insert(signals);
-    if (error) errors.push({ source: "insert_signals", message: error.message });
+  if (updates.length) {
+    const { data: results, error } = await db.rpc("apply_collector_updates", { p: updates });
+    if (error) { errors.push({ source: "update_tokens", message: error.message }); return; }
+    // la señal solo se escribe si el cambio de estado se aplicó de verdad (si risk cambió el estado antes, no)
+    const signals = ((results ?? []) as { mint: string; applied: boolean }[])
+      .filter((r) => r.applied && signalByMint.has(r.mint)).map((r) => signalByMint.get(r.mint)!);
+    if (signals.length) {
+      const { error: sErr } = await db.from("signals").insert(signals);
+      if (sErr) errors.push({ source: "insert_signals", message: sErr.message });
+    }
   }
 }
 
@@ -210,12 +218,20 @@ Deno.serve(async () => {
   const tally = { saved: 0 };
   let seen = 0;
   let discovered = 0;
+  let dbSizeMb: number | null = null;
 
   try {
-    discovered = await discover(errors);
-
     const { data: rules, error: rulesErr } = await db.from("rules").select("*").eq("id", 1).single();
     if (rulesErr || !rules) throw new Error(`rules: ${rulesErr?.message ?? "sin fila"}`);
+
+    // Freno de seguridad: con la base por encima de db_max_mb no entran tokens nuevos (se sigue a los que ya hay)
+    const { data: size } = await db.rpc("db_size_mb");
+    dbSizeMb = size == null ? null : Number(size);
+    if (dbSizeMb != null && dbSizeMb > rules.db_max_mb) {
+      errors.push({ source: "db_size", message: `base ${dbSizeMb} MB > límite ${rules.db_max_mb} MB: descubrimiento pausado` });
+    } else {
+      discovered = await discover(errors);
+    }
 
     const { data: due, error: dueErr } = await db.from("tokens").select("*")
       .neq("status", "dead").lte("next_snapshot_at", new Date().toISOString())
@@ -240,7 +256,7 @@ Deno.serve(async () => {
   const duration = Date.now() - started;
   const { error: runErr } = await db.from("collector_runs").insert({
     tokens_seen: seen, snapshots_saved: tally.saved, errors: errors.length,
-    error_detail: errors.length ? errors : null, duration_ms: duration,
+    error_detail: errors.length ? errors : null, duration_ms: duration, db_size_mb: dbSizeMb,
   });
   if (runErr) console.error("collector_runs:", runErr.message);
 
