@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { getSupabase } from "./supabase";
-import type { FeedRow, Holder, RiskCheck, Rules, Signal, Snapshot } from "./types";
+import type { AgeCohort, FeedRow, Holder, OutcomeSummary, RiskCheck, Rules, Signal, Snapshot } from "./types";
 
 async function db() {
   await connection(); // lectura en vivo: nunca se prerenderiza ni se cachea
@@ -57,4 +57,21 @@ export async function getRecentSignals(limit = 150): Promise<Signal[]> {
   const sb = await db();
   const res = await sb.from("signals").select("id, ts, verdict, reasons, data, mint, tokens(symbol, name)").neq("verdict", "dead").order("ts", { ascending: false }).limit(limit);
   return ok(res) as unknown as Signal[];
+}
+
+export async function getResults() {
+  const sb = await db();
+  const [summary, cohorts, total, complete] = await Promise.all([
+    sb.from("outcome_summary").select("*").order("verdict").order("age_bucket"),
+    sb.from("age_cohorts").select("*").order("cohort"),
+    sb.from("token_outcomes").select("signal_id", { count: "exact", head: true }),
+    sb.from("token_outcomes").select("signal_id", { count: "exact", head: true }).eq("complete", true),
+  ]);
+  for (const r of [summary, cohorts]) if (r.error) throw new Error(r.error.message);
+  return {
+    summary: (summary.data ?? []) as OutcomeSummary[],
+    cohorts: (cohorts.data ?? []) as AgeCohort[],
+    total: total.count ?? 0,
+    complete: complete.count ?? 0,
+  };
 }

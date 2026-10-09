@@ -97,3 +97,17 @@ export type Signal = {
   mint: string;
   tokens?: { symbol: string | null; name: string | null } | null;
 };
+
+export type OutcomeSummary = {
+  verdict: string; age_bucket: string; n: number; n_complete: number;
+  n_5m: number; med_5m: number | null; n_15m: number; med_15m: number | null;
+  n_60m: number; med_60m: number | null; win_60m: number | null; n_60m_c: number; med_60m_c: number | null;
+  n_6h: number; med_6h: number | null; n_24h: number; med_24h: number | null;
+  med_max_return: number | null; med_max_drawdown: number | null; n_con_arrastre: number;
+};
+
+export type AgeCohort = {
+  cohort: string; n_base: number;
+  n_15m: number; med_x_15m: number | null; n_60m: number; med_x_60m: number | null;
+  n_6h: number; med_x_6h: number | null; n_24h: number; med_x_24h: number | null;
+};

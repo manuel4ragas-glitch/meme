@@ -27,6 +27,7 @@ async function Health() {
 const nav = [
   { href: "/", label: "Feed" },
   { href: "/signals", label: "Señales" },
+  { href: "/results", label: "Resultados" },
   { href: "/rules", label: "Reglas" },
 ];
 
