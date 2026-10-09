@@ -11,7 +11,7 @@ async function Health() {
   } catch {
     return <span className="flex items-center gap-2 text-xs text-red-400"><span className="h-2 w-2 rounded-full bg-red-500" />sin conexión</span>;
   }
-  const { run, riskTs, dbMaxMb } = health;
+  const { run, riskTs, dbMaxMb, queueLastHour: q } = health;
   const age = minutesSince(run?.ts);
   const tone = age == null ? "bg-red-500" : age <= 3 && !run?.errors ? "bg-emerald-500" : age <= 10 ? "bg-amber-500" : "bg-red-500";
   const riskAge = minutesSince(riskTs);
@@ -27,7 +27,10 @@ async function Health() {
       <span className={`hidden sm:inline ${dbTone}`} title="Tamaño de la base frente al límite que frena el descubrimiento">
         · base {dbMb == null ? "—" : `${Math.round(dbMb)}${dbMaxMb ? `/${dbMaxMb}` : ""} MB`}
       </span>
-      {paused && <span className="text-red-400">descubrimiento pausado</span>}
+      <span className="hidden md:inline text-zinc-500" title="Cola de lanzamientos: tokens esperando cumplir las reglas. Última hora: entraron / promovidos a seguimiento / descartados">
+        · cola {run?.queue_size ?? "—"} <span className="text-zinc-600">(1h: +{q.queued} ✓{q.promoted} ✗{q.dropped})</span>
+      </span>
+      {paused && <span className="text-red-400">promoción pausada</span>}
     </span>
   );
 }

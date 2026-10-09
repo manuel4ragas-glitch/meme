@@ -44,6 +44,8 @@ export type Rules = {
   lp_locked_min_pct: number;
   retention_days: number;
   db_max_mb: number;
+  queue_mcap_min: number;
+  queue_max_age_min: number;
 };
 
 export type Snapshot = {

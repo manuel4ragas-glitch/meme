@@ -17,6 +17,8 @@ const FIELDS: { key: keyof Rules; label: string; help: string }[] = [
   { key: "insiders_max_pct", label: "Insiders máximo (% supply)", help: "Sobre esto se descarta." },
   { key: "lp_locked_min_pct", label: "LP bloqueada mínima (%)", help: "Bajo esto se descarta (no aplica a la bonding curve de pump.fun)." },
   { key: "dead_liq_min", label: "Liquidez mínima de vida (USD)", help: "Bajo esto el token pasa a «muerto» y deja de seguirse." },
+  { key: "queue_mcap_min", label: "Cola: MCap mínimo para promover (USD)", help: "Un token en cola pasa a seguimiento cuando su MCap está entre este valor y el MCap máximo y hubo operaciones en los últimos 5 min." },
+  { key: "queue_max_age_min", label: "Cola: espera máxima (min)", help: "Pasado este tiempo sin cumplir las reglas, el token se descarta de la cola." },
   { key: "retention_days", label: "Retención de snapshots (días)", help: "Días que se conservan los snapshots de tokens muertos antes de borrarlos (solo si su backtesting ya cerró)." },
   { key: "db_max_mb", label: "Límite de la base (MB)", help: "Sobre este tamaño el recolector deja de descubrir tokens nuevos. El plan gratuito de Supabase tiene 500 MB." },
 ];

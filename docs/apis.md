@@ -55,3 +55,13 @@ Campos de `tokens/v1` (un par): `pairAddress`, `dexId`, `baseToken{address,name,
 3. Lotes de DexScreener de **máximo 30** direcciones, y comprobar que cada dirección pedida aparece en la respuesta (el exceso se pierde sin avisar).
 4. Un token puede tener varios pares: elegir el de mayor liquidez y guardar su `pair_address`.
 5. `liquidity` puede faltar: columna nullable y regla de mercado tolerante.
+
+## GeckoTerminal (Fase B, verificado 2026-10-09)
+
+`GET https://api.geckoterminal.com/api/v2/networks/solana/new_pools?page=1` → 200 sin API key. Muestra: `docs/samples/geckoterminal_new_pools.json`.
+
+- Devuelve **20 pools** por página, los más recientes primero. Formato JSON:API: `data[]` con `attributes` y `relationships`.
+- El mint **no** viene como campo: está en `relationships.base_token.data.id` con el prefijo `solana_` (`solana_<mint>`). Si la base es SOL envuelto (`So1111…`), el token es `quote_token`.
+- Campos útiles: `attributes.name` («SIMBOLO / SOL»), `attributes.pool_created_at` (ISO, UTC), `attributes.address` (el pool), `attributes.fdv_usd`, `attributes.reserve_in_usd`, `relationships.dex.data.id` (`pump-fun`, `meteora-damm-v2`…).
+- `attributes.market_cap_usd` viene **nulo** en pools nuevos: el MCap hay que sacarlo de DexScreener.
+- Respuesta con `Cache-Control: max-age=30, public`: pedir más de 1 vez por minuto no aporta datos nuevos. No devuelve cabeceras de límite; la documentación pública habla de ~30 llamadas por minuto sin clave. Se usa **1 llamada por minuto**.
