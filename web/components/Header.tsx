@@ -11,7 +11,8 @@ async function Health() {
   } catch {
     return <span className="flex items-center gap-2 text-xs text-red-400"><span className="h-2 w-2 rounded-full bg-red-500" />sin conexión</span>;
   }
-  const { run, riskTs, dbMaxMb, queueLastHour: q } = health;
+  const { run, riskTs, dbMaxMb, queueLastHour: q, listener } = health;
+  const listenerAge = minutesSince(listener?.ts);
   const age = minutesSince(run?.ts);
   const tone = age == null ? "bg-red-500" : age <= 3 && !run?.errors ? "bg-emerald-500" : age <= 10 ? "bg-amber-500" : "bg-red-500";
   const riskAge = minutesSince(riskTs);
@@ -23,6 +24,9 @@ async function Health() {
     <span className="flex items-center gap-2 text-xs text-zinc-400" title={run ? `Último run: ${run.tokens_seen} tokens, ${run.snapshots_saved} snapshots, ${run.errors} errores` : "Sin ejecuciones"}>
       <span className={`h-2 w-2 rounded-full ${tone}`} />
       <span>recolector {age == null ? "sin datos" : `hace ${age}m`}</span>
+      <span className={`hidden md:inline ${listener?.error ? "text-amber-400" : "text-zinc-600"}`} title={listener ? `Última conexión a Pump.fun: ${listener.events_received} eventos${listener.error ? `, error: ${listener.error}` : ""}` : "Sin ejecuciones del oyente"}>
+        · oyente {listenerAge == null ? "—" : `hace ${listenerAge}m`}
+      </span>
       <span className="hidden sm:inline text-zinc-600">· riesgo {riskAge == null ? "—" : `hace ${riskAge}m`}</span>
       <span className={`hidden sm:inline ${dbTone}`} title="Tamaño de la base frente al límite que frena el descubrimiento">
         · base {dbMb == null ? "—" : `${Math.round(dbMb)}${dbMaxMb ? `/${dbMaxMb}` : ""} MB`}

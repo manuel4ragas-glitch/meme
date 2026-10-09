@@ -1,0 +1,63 @@
+[
+ {
+  "t": 676,
+  "data": {
+   "message": "Successfully subscribed to token creation events."
+  }
+ },
+ {
+  "t": 676,
+  "data": {
+   "message": "Subscribed to 'migration' events."
+  }
+ },
+ {
+  "t": 935,
+  "data": {
+   "signature": "3wav3EUkpb1fRYm88wpeFUF8LSfU6nHbYGtXEYPQLQy8RdDZDH1xkkeWgdy6GB9EN4KesCdwAX96V1BMQAhhiEM8",
+   "mint": "GSe9PsV5grRodJMUFBc3gX29HRpYr64v41WLUA4gdZrD",
+   "traderPublicKey": "G5MyJtB2C1A9cSCcN1kBtkZhtdSoJzjSSH8ct2U8MPFv",
+   "txType": "create",
+   "initialBuy": 0,
+   "solAmount": 0,
+   "bondingCurveKey": "E9mjHKQrUqHMuDsuzree5VJ8xcwv3CnGFf63Xf7qujrG",
+   "vTokensInBondingCurve": 1073000000,
+   "vSolInBondingCurve": 30,
+   "marketCapSol": 27.958993476234856,
+   "name": "dogezilla",
+   "symbol": "dogezilla",
+   "uri": "https://md.sdfgsdfsdf.uk/metadata/lWgPs5uP",
+   "is_mayhem_mode": false,
+   "pool": "pump"
+  }
+ },
+ {
+  "t": 2579,
+  "data": {
+   "signature": "F9s8tZkLswFWHGeYMZYPQSMMZ7WKuALHJse9PKJoooJ7KyhNiv2Y7MPefcCwstfh6wZ5RdudbuPQZTp8X9bEARe",
+   "mint": "9s1AYEzZpWxaaxaD6a66U4vtXDsJ9eVKPDraVFXkuPbi",
+   "traderPublicKey": "GnZJHg7rTQzyYMos5HW9CnTuZUUbiRrkXcenE4S6iZSA",
+   "txType": "create",
+   "initialBuy": 0,
+   "solAmount": 0,
+   "bondingCurveKey": "GfrTFySfNGzY5dAEywoJwkAeoPhVjnKaJQW7vThvm2uC",
+   "vTokensInBondingCurve": 1073000000,
+   "vSolInBondingCurve": 30,
+   "marketCapSol": 27.958993476234856,
+   "name": "Tryimoo",
+   "symbol": "IMO",
+   "uri": "https://ipfs.io/ipfs/bafkreifaxyxemu4gcbubh7hxfclcmr2wudjtuu2ombw3gjclladqy37pki",
+   "is_mayhem_mode": false,
+   "pool": "pump"
+  }
+ },
+ {
+  "t": 24660,
+  "data": {
+   "signature": "3SYbZvQF7SsDH288T2nez5Ls7T2njHqP49y8USBLrf2gNr3gXsXfj1Soj4nBXd6SMFoRbLhoAGb1UFUqLVcsRk4C",
+   "mint": "HYTx3ghoSY1RbuXG1Pvib1WhZLhKgcrpRDDTvVBBpump",
+   "txType": "migrate",
+   "pool": "pump-amm"
+  }
+ }
+]

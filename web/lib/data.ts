@@ -44,16 +44,18 @@ export async function getFeed(q: FeedQuery): Promise<{ rows: FeedRow[]; total: n
 export async function getHealth() {
   const sb = await db();
   const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
-  const [run, risk, rules, hour] = await Promise.all([
+  const [run, risk, rules, hour, listener] = await Promise.all([
     sb.from("collector_runs").select("ts, tokens_seen, snapshots_saved, errors, db_size_mb, error_detail, queue_size").order("ts", { ascending: false }).limit(1).maybeSingle(),
     sb.from("risk_checks").select("ts").order("ts", { ascending: false }).limit(1).maybeSingle(),
     sb.from("rules").select("db_max_mb").eq("id", 1).maybeSingle(),
     sb.from("collector_runs").select("queued, promoted, dropped").gte("ts", hourAgo).limit(200),
+    sb.from("listener_runs").select("ts, events_received, error").not("finished_at", "is", null).order("ts", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const sum = (k: "queued" | "promoted" | "dropped") => (hour.data ?? []).reduce((s, r) => s + (r[k] ?? 0), 0);
   return {
     run: run.data, riskTs: risk.data?.ts ?? null, dbMaxMb: rules.data?.db_max_mb ?? null, error: run.error?.message ?? null,
     queueLastHour: { queued: sum("queued"), promoted: sum("promoted"), dropped: sum("dropped") },
+    listener: listener.data,
   };
 }
 
