@@ -17,6 +17,9 @@ Todo vive en el esquema `memes`; no se toca `public`. Hora en UTC (`timestamptz`
 - **`mint_authority_active` / `freeze_authority_active`** son booleanos: RugCheck devuelve `null` si la autoridad fue revocada.
 - **`insider_evidence`** (`none`/`weak`/`strong`): los insiders son una señal, no una prueba.
 - **`top1_pct`, `top10_pct`, `insiders_pct`** se calculan en la función `risk` excluyendo wallets `lp` y `burn`. La base solo guarda el resultado.
+- **`holder_snapshots.label`** admite también `locker` (contratos de bloqueo/stake; se excluyen de las métricas como `lp` y `burn`).
+- **`rules.lp_locked_min_pct`** (extra al plan, por defecto 50): LP bloqueada mínima para no descartar.
+- **Vista `token_feed`**: último snapshot y último chequeo verificado por token no muerto; la usa el dashboard (`docs/fase4.md`).
 - **`rules.dead_liq_min`** (extra al plan): liquidez bajo la cual un token pasa a `dead`. Los valores por defecto de `rules` son una propuesta; ajústalos a tu criterio.
 - **RLS**: cualquiera puede leer; solo `service_role` escribe (las Edge Functions); solo un usuario autenticado puede editar `rules`. Ojo para la Fase 4: guardar filtros desde el dashboard exigirá iniciar sesión.
 

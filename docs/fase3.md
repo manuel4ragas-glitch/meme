@@ -17,23 +17,23 @@
 | Pasa todo | `alert` |
 | Sin verificar (RugCheck falló/limitó) | `candidate` |
 
-**Descartes duros:** `rugged`, mint authority activa, freeze authority activa, LP bloqueada < 50 %, top 10 > `rules.top10_max_pct`, insiders > `rules.insiders_max_pct`.
+**Descartes duros:** `rugged`, mint authority activa, freeze authority activa, LP bloqueada < `rules.lp_locked_min_pct` (50 por defecto), top 10 > `rules.top10_max_pct`, insiders > `rules.insiders_max_pct`.
 
 **Bloqueo (no descarta):** si DexScreener no trajo liquidez (pares `pumpfun`), se verifica con `totalMarketLiquidity` de RugCheck contra `rules.liq_min`. Cierra el pendiente de la Fase 2. Se separa del descarte porque la liquidez puede crecer.
 
 ## Cómo se calculan las métricas
-- **Excluidos:** wallets `lp` y `burn` no cuentan en `top1_pct`, `top10_pct` ni `insiders_pct` (tu regla de excepción).
+- **Excluidos:** wallets `lp`, `burn` y `locker` no cuentan en `top1_pct`, `top10_pct` ni `insiders_pct` (tu regla de excepción).
   - `lp`: el dueño o la cuenta es el pool (`markets[]`) o un `knownAccounts` de tipo `AMM`.
   - `burn`: `1nc1nerator…` y la dirección `1111…1111`. RugCheck no tiene un tipo para quema.
   - `creator` y `unknown` **sí** cuentan. Ejemplo real: un token con el creador al 86 % del supply se descarta por concentración.
-- **`LOCKER`** (contratos de bloqueo/stake) se trata como `unknown` y por tanto cuenta. Es la lectura estricta de tu regla; puede sobrestimar la concentración. Dime si quieres que también se excluya.
+- **`locker`**: los contratos de bloqueo/stake (`LOCKER` de RugCheck) se etiquetan aparte y también se excluyen (decisión del dueño, fase 4).
 - **Insiders:** RugCheck los entrega como redes de wallets (`insiderNetworks`), no marcados en `topHolders`. `insiders_pct` es el mayor entre (suma de `currentHolding` de las redes / supply) y (suma de holders marcados). Las redes no se pueden filtrar por `lp`/`burn`.
 - **Evidencia (`insider_evidence`):** `strong` si hay ≥ 3 redes, o ≥ 1 red más holders marcados; `weak` si hay alguna señal; `none` si no hay ninguna. Es una heurística mía: los insiders son señal, no prueba.
 - **LP bloqueada:** se toma el mercado con más liquidez. En la bonding curve de `pump.fun` (`marketType = pump_fun`) no hay LP que bloquear: queda `NULL` y la regla no aplica.
 
 ## Límites y robustez
 - RugCheck a ~1 req/s; presupuesto de 40 s por ejecución (máx. 40 tokens). Un 429 detiene la ejecución y lo deja `unverified`; un 400 «unable to generate report» también.
-- `LP_LOCKED_MIN_PCT = 50` es una constante del código (no hay columna en `rules`).
+- El umbral de LP bloqueada vive en `rules.lp_locked_min_pct` (migración de la fase 4).
 - Esta función no escribe `collector_runs`; su resultado se ve en `risk_checks`.
 
 ## Verificación

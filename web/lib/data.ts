@@ -1,0 +1,60 @@
+import { connection } from "next/server";
+import { getSupabase } from "./supabase";
+import type { FeedRow, Holder, RiskCheck, Rules, Signal, Snapshot } from "./types";
+
+async function db() {
+  await connection(); // lectura en vivo: nunca se prerenderiza ni se cachea
+  const sb = getSupabase();
+  if (!sb) throw new Error("Faltan NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return sb;
+}
+
+function ok<T>(res: { data: T | null; error: { message: string } | null }): T {
+  if (res.error) throw new Error(res.error.message);
+  return res.data as T;
+}
+
+export async function getRules(): Promise<Rules> {
+  const sb = await db();
+  return ok(await sb.from("rules").select("*").eq("id", 1).single());
+}
+
+export async function getFeed(): Promise<FeedRow[]> {
+  const sb = await db();
+  return ok(await sb.from("token_feed").select("*").limit(1000));
+}
+
+export async function getHealth() {
+  const sb = await db();
+  const [run, risk] = await Promise.all([
+    sb.from("collector_runs").select("ts, tokens_seen, snapshots_saved, errors").order("ts", { ascending: false }).limit(1).maybeSingle(),
+    sb.from("risk_checks").select("ts").order("ts", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  return { run: run.data, riskTs: risk.data?.ts ?? null, error: run.error?.message ?? null };
+}
+
+export async function getToken(mint: string) {
+  const sb = await db();
+  const [token, snaps, checks, holders, signals] = await Promise.all([
+    sb.from("tokens").select("mint, symbol, name, dex, status, pair_address, creator, pair_created_at, first_seen_at").eq("mint", mint).maybeSingle(),
+    sb.from("market_snapshots").select("ts, price_usd, mcap, liquidity_usd, volume_m5, volume_h1, buys_m5, sells_m5, buys_h1, sells_h1, price_change_m5, price_change_h1")
+      .eq("mint", mint).order("ts", { ascending: false }).limit(1500),
+    sb.from("risk_checks").select("*").eq("mint", mint).order("ts", { ascending: true }),
+    sb.from("holder_snapshots").select("ts, rank, owner, pct, is_insider, label").eq("mint", mint).order("ts", { ascending: false }).limit(100),
+    sb.from("signals").select("id, ts, verdict, reasons, data, mint").eq("mint", mint).order("ts", { ascending: false }).limit(20),
+  ]);
+  for (const r of [token, snaps, checks, holders, signals]) if (r.error) throw new Error(r.error.message);
+  return {
+    token: token.data as { mint: string; symbol: string | null; name: string | null; dex: string | null; status: FeedRow["status"]; pair_address: string | null; creator: string | null; pair_created_at: string | null; first_seen_at: string } | null,
+    snapshots: ((snaps.data ?? []) as Snapshot[]).reverse(),
+    checks: (checks.data ?? []) as RiskCheck[],
+    holders: (holders.data ?? []) as Holder[],
+    signals: (signals.data ?? []) as Signal[],
+  };
+}
+
+export async function getRecentSignals(limit = 150): Promise<Signal[]> {
+  const sb = await db();
+  const res = await sb.from("signals").select("id, ts, verdict, reasons, data, mint, tokens(symbol, name)").neq("verdict", "dead").order("ts", { ascending: false }).limit(limit);
+  return ok(res) as unknown as Signal[];
+}

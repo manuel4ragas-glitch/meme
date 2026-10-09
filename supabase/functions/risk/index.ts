@@ -13,13 +13,14 @@ const RUGCHECK_GAP_MS = 1_100;
 const RETRY_GAP_MS = 60_000; // mínimo entre dos intentos del mismo token
 const OFFSETS_MIN = [0, 5, 15, 60]; // chequeos: al entrar como candidato y a los 5, 15 y 60 min
 const MAX_TOKENS = 40;
-const LP_LOCKED_MIN_PCT = 50; // bajo este % de LP bloqueada/quemada se descarta (no hay columna en rules)
+// lp, burn y locker (contratos de bloqueo/stake) no son holders reales: quedan fuera de las métricas
+const EXCLUDED = new Set(["lp", "burn", "locker"]);
 const BURN = new Set(["1nc1nerator11111111111111111111111111111111", "11111111111111111111111111111111"]);
 
 // deno-lint-ignore no-explicit-any
 type Json = any;
 type Check = { rule: string; ok: boolean; value: number | string | boolean | null; limit?: number | string };
-type Rules = { liq_min: number; top10_max_pct: number; insiders_max_pct: number };
+type Rules = { liq_min: number; top10_max_pct: number; insiders_max_pct: number; lp_locked_min_pct: number };
 type Fetched = { kind: "ok"; data: Json } | { kind: "rate_limited" } | { kind: "failed"; message: string };
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -60,7 +61,7 @@ function analyze(d: Json, snapLiquidity: number | null, rules: Rules) {
     if (ids.some((i) => poolKeys.has(i) || known[i]?.type === "AMM")) return "lp";
     if (ids.some((i) => i === d.creator || known[i]?.type === "CREATOR")) return "creator";
     if (ids.some((i) => ["CEX", "EXCHANGE"].includes(known[i]?.type))) return "exchange";
-    // LOCKER cuenta como 'unknown': solo lp y burn quedan fuera de las métricas (regla del dueño)
+    if (ids.some((i) => known[i]?.type === "LOCKER")) return "locker";
     return "unknown";
   };
 
@@ -69,7 +70,7 @@ function analyze(d: Json, snapLiquidity: number | null, rules: Rules) {
     is_insider: !!h.insider, label: labelOf(h),
   }));
 
-  const counted = holderRows.filter((h) => h.label !== "lp" && h.label !== "burn").sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0));
+  const counted = holderRows.filter((h) => !EXCLUDED.has(h.label)).sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0));
   const top1 = counted[0]?.pct ?? 0;
   const top10 = counted.slice(0, 10).reduce((s, h) => s + (h.pct ?? 0), 0);
 
@@ -103,7 +104,7 @@ function analyze(d: Json, snapLiquidity: number | null, rules: Rules) {
     { rule: "top10_pct", ok: top10 <= rules.top10_max_pct, value: round(top10), limit: rules.top10_max_pct },
     { rule: "insiders_pct", ok: insidersPct <= rules.insiders_max_pct, value: round(insidersPct), limit: rules.insiders_max_pct },
   ];
-  if (lpLocked != null) discard.push({ rule: "lp_bloqueada_pct", ok: lpLocked >= LP_LOCKED_MIN_PCT, value: round(lpLocked), limit: LP_LOCKED_MIN_PCT });
+  if (lpLocked != null) discard.push({ rule: "lp_bloqueada_pct", ok: lpLocked >= rules.lp_locked_min_pct, value: round(lpLocked), limit: rules.lp_locked_min_pct });
 
   // Solo bloquean la aprobación (no descartan): la liquidez puede crecer
   const blockers: Check[] = [];
